@@ -1,0 +1,183 @@
+name: Build
+
+# - Push / PR to `main`: build the release APK and upload it as an Actions artifact named
+#   pairipfix-<ref>-<short7hash>.apk. Nothing is tagged or published.
+# - Manual run (workflow_dispatch on `main`, with a version such as 1.3): cut a RELEASE. Tags the
+#   built commit v<version> and publishes a GitHub Release carrying pairipfix-v<version>.apk.
+# versionCode is the commit count on the built ref, so it rises with every commit on `main` and
+# Android accepts each release as an upgrade. Releases require the SIGNING_KEY secret: a
+# debug-signed public APK has a different certificate and every later update would fail with
+# INSTALL_FAILED_UPDATE_INCOMPATIBLE. Branch builds without the secret fall back to debug signing.
+
+on:
+  push:
+    branches:
+      - 'main'
+  pull_request:
+    branches:
+      - 'main'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version without the leading v (e.g. 1.3)'
+        required: true
+        type: string
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
+  # Supersede in-progress branch builds, but never cancel a release run mid-publish.
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    # Needed by the release path to create the tag and the Release.
+    permissions:
+      contents: write
+
+    env:
+      IS_RELEASE: ${{ github.event_name == 'workflow_dispatch' }}
+
+    steps:
+      - name: Validate release request
+        if: env.IS_RELEASE == 'true'
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "::error::Releases are cut from 'main' only (got ${GITHUB_REF})."
+            exit 1
+          fi
+          if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+(\.[0-9]+){1,2}$'; then
+            echo "::error::version must look like 1.3 or 1.3.1 (got '${VERSION}')."
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Full history: versionCode is the commit count, and release notes need the previous tag.
+          fetch-depth: 0
+
+      - name: JDK 21 Setup
+        uses: actions/setup-java@v5.2.0
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: gradle
+
+      - name: Gradlew Permissions
+        run: chmod +x gradlew
+
+      - name: Signature files preparation
+        # Secrets are passed via env (not inline ${{ }} interpolation) and quoted, so a key
+        # containing shell-special characters is decoded intact and never hits the command line.
+        env:
+          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+          KEY_STORE_PASSWORD: ${{ secrets.KEY_STORE_PASSWORD }}
+          ALIAS: ${{ secrets.ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          WORKSPACE: ${{ github.workspace }}
+        run: |
+          if [ -n "$SIGNING_KEY" ]; then
+            {
+              echo "storePassword=$KEY_STORE_PASSWORD"
+              echo "keyAlias=$ALIAS"
+              echo "keyPassword=$KEY_PASSWORD"
+              echo "storeFile=$WORKSPACE/ReleaseKey.jks"
+            } > ReleaseKey.properties
+            printf '%s' "$SIGNING_KEY" | base64 --decode > "$WORKSPACE/ReleaseKey.jks"
+          elif [ "$IS_RELEASE" = "true" ]; then
+            echo "::error::SIGNING_KEY secret is required for release builds; aborting."
+            exit 1
+          else
+            echo "No SIGNING_KEY secret set -- build will fall back to debug signing."
+          fi
+
+      - name: Compute version
+        id: ver
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          CODE="$(git rev-list --count HEAD)"
+          SHORT="$(git rev-parse --short=7 HEAD)"
+          if [ "$IS_RELEASE" = "true" ]; then
+            NAME="$VERSION"
+            TAG="v${VERSION}"
+            if git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null; then
+              echo "::error::tag ${TAG} already exists on origin; refusing to re-release it."
+              exit 1
+            fi
+          else
+            NAME="dev-${SHORT}"
+            TAG=""
+          fi
+          {
+            echo "code=${CODE}"
+            echo "name=${NAME}"
+            echo "tag=${TAG}"
+            echo "short=${SHORT}"
+          } >> "$GITHUB_OUTPUT"
+          echo "Building ${NAME} (versionCode ${CODE})"
+
+      - name: Gradle Build
+        env:
+          CODE: ${{ steps.ver.outputs.code }}
+          NAME: ${{ steps.ver.outputs.name }}
+        run: ./gradlew assembleRelease -PversionCode="$CODE" -PversionName="$NAME" --console=plain
+
+      - name: Check the APK is a loadable module
+        run: |
+          APK="app/build/outputs/apk/release/app-release.apk"
+          [ -f "$APK" ] || { echo "::error::expected $APK was not produced"; ls -lR app/build/outputs/apk || true; exit 1; }
+          # LSPosed reads assets/xposed_init and loads the class named there; both must ship.
+          unzip -p "$APK" assets/xposed_init | grep -qx 'io.github.ahmedmani.pairipfix.mainHook' \
+            || { echo "::error::assets/xposed_init missing or wrong in $APK"; exit 1; }
+          unzip -l "$APK" | grep -q 'classes.dex' \
+            || { echo "::error::no classes.dex in $APK"; exit 1; }
+          echo "APK=$APK" >> "$GITHUB_ENV"
+
+      - name: Stage hash-named artifact
+        id: stage
+        run: |
+          BASE="pairipfix-${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}-${{ steps.ver.outputs.short }}"
+          BASE="${BASE//\//-}"
+          mkdir -p dist
+          cp "$APK" "dist/${BASE}.apk"
+          echo "base=${BASE}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.stage.outputs.base }}
+          path: dist/${{ steps.stage.outputs.base }}.apk
+          if-no-files-found: error
+
+      - name: Publish GitHub Release (release only)
+        if: env.IS_RELEASE == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.ver.outputs.tag }}
+        run: |
+          cp "$APK" "pairipfix-${TAG}.apk"
+
+          # Changelog since the previous v* tag, else the latest 50 commits.
+          PREV_TAG="$(git tag -l 'v*' --sort=-creatordate | head -n1)"
+          LOG_ARGS=(--no-merges --pretty=format:'- %s (%h)')
+          if [ -n "$PREV_TAG" ]; then
+            LOG_ARGS+=("${PREV_TAG}..HEAD")
+            HEADER="## Changes since ${PREV_TAG}"
+          else
+            LOG_ARGS+=(-n 50 HEAD)
+            HEADER="## Changes (most recent 50 commits)"
+          fi
+          NOTES_FILE="$(mktemp)"
+          printf '%s\n\n%s\n' "$HEADER" "$(git log "${LOG_ARGS[@]}")" > "$NOTES_FILE"
+
+          # --target creates the tag on GitHub at exactly the commit that was built.
+          gh release create "${TAG}" "pairipfix-${TAG}.apk" \
+            --target "$GITHUB_SHA" \
+            --title "${TAG}" \
+            --notes-file "$NOTES_FILE" \
+            --latest

@@ -8,8 +8,6 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         tools:targetApi="36"
-        android:versionCode="1"
-        android:versionName="1.2"
         tools:ignore="AllowBackup">
 
         <meta-data

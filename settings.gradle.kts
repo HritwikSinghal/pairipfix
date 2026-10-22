@@ -22,6 +22,6 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "io.github.ahmedmani.pairipfixio.github.ahmedmani.pairipfix"
+rootProject.name = "pairipfix"
 include(":app")
  
