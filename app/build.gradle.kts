@@ -16,8 +16,6 @@ android {
         // CI passes these (-PversionCode / -PversionName); local builds get a dev version.
         versionCode = (findProperty("versionCode") as String?)?.toInt() ?: 1
         versionName = (findProperty("versionName") as String?) ?: "dev"
-
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     // ReleaseKey.properties is written by CI from repository secrets. Without it, release builds
@@ -56,11 +54,6 @@ android {
 }
 
 dependencies {
-
-    implementation(libs.appcompat)
-    implementation(libs.material)
-    testImplementation(libs.junit)
-    androidTestImplementation(libs.ext.junit)
-    androidTestImplementation(libs.espresso.core)
+    // Provided at runtime by LSPosed; must never be bundled into the APK.
     compileOnly("de.robv.android.xposed:api:82")
 }

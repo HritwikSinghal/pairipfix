@@ -1,5 +1,4 @@
 <resources>
-    <string-array name="xposedscope" >
-        <item>com.android.pairipfix</item>
-    </string-array>
+    <!-- No recommended scope: pick the pairip-protected apps in LSPosed Manager. -->
+    <string-array name="xposedscope" />
 </resources>
