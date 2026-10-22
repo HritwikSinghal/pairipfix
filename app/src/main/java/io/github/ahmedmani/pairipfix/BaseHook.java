@@ -11,12 +11,25 @@ import de.robv.android.xposed.XposedHelpers;
 public abstract  class BaseHook {
         protected ClassLoader classLoader;
 
+        // Every helper call counts as one attempt, so the summary log reflects individual hooks
+        // instead of reporting a whole group as applied when only one of its hooks landed.
+        private int attempted = 0;
+        private int applied = 0;
+
         public abstract String getName();
-        public abstract boolean apply();
+        public abstract void apply();
 
         public BaseHook init(ClassLoader _classLoader) {
             this.classLoader = _classLoader;
             return this;
+        }
+
+        public int getAttempted() {
+            return attempted;
+        }
+
+        public int getApplied() {
+            return applied;
         }
 
         protected boolean classExists(String className) {
@@ -28,14 +41,25 @@ public abstract  class BaseHook {
             return XposedHelpers.findClassIfExists(className, this.classLoader);
         }
 
+        private boolean record(boolean success) {
+            attempted++;
+            if (success) {
+                applied++;
+            }
+            return success;
+        }
+
+        private void logFailure(String what, Throwable t) {
+            XposedBridge.log("[PairIPFix] " + getName() + ": failed to " + what + ": " + t);
+        }
+
         protected boolean setStaticField(String className, String fieldName, Object value) {
-            Class<?> clazz = findClass(className);
             try {
-                XposedHelpers.setStaticObjectField(clazz, fieldName, value);
-                return true;
+                XposedHelpers.setStaticObjectField(findClass(className), fieldName, value);
+                return record(true);
             } catch (Throwable t) {
-                XposedBridge.log("[PairIPFix] Failed to change static field value for class: " + className + ", fieldName: " + fieldName + ", value to be set: " + value);
-                return false;
+                logFailure("set static field " + className + "." + fieldName + " = " + value, t);
+                return record(false);
             }
         }
 
@@ -43,10 +67,26 @@ public abstract  class BaseHook {
             try {
                 Object[] args = buildArgs(paramTypes, XC_MethodReplacement.DO_NOTHING);
                 XposedHelpers.findAndHookMethod(className, this.classLoader, methodName, args);
-                return true;
+                return record(true);
             } catch (Throwable t) {
-                XposedBridge.log("[PairIPFix] Failed to hook method with path " + className + "." + methodName);
-                return false;
+                logFailure("hook " + className + "." + methodName, t);
+                return record(false);
+            }
+        }
+
+        // For methods whose parameter types are not known (they vary across pairip versions):
+        // replaces every overload. Only safe for void methods, since DO_NOTHING returns null.
+        protected boolean hookAllDoNothing(String className, String methodName) {
+            try {
+                Class<?> clazz = XposedHelpers.findClass(className, this.classLoader);
+                boolean hooked = !XposedBridge.hookAllMethods(clazz, methodName, XC_MethodReplacement.DO_NOTHING).isEmpty();
+                if (!hooked) {
+                    XposedBridge.log("[PairIPFix] " + getName() + ": no method " + className + "." + methodName + " to hook");
+                }
+                return record(hooked);
+            } catch (Throwable t) {
+                logFailure("hook all " + className + "." + methodName, t);
+                return record(false);
             }
         }
 
@@ -55,10 +95,10 @@ public abstract  class BaseHook {
                 XC_MethodReplacement replacement = XC_MethodReplacement.returnConstant(returnValue);
                 Object[] args = buildArgs(paramTypes, replacement);
                 XposedHelpers.findAndHookMethod(className, this.classLoader, methodName, args);
-                return true;
+                return record(true);
             } catch (Throwable t) {
-                XposedBridge.log("[PairIPFix] Failed to hook method with path " + className + "." + methodName);
-                return false;
+                logFailure("hook " + className + "." + methodName, t);
+                return record(false);
             }
         }
 
@@ -72,10 +112,10 @@ public abstract  class BaseHook {
                 };
                 Object[] args = buildArgs(paramTypes, hook);
                 XposedHelpers.findAndHookMethod(className, this.classLoader, methodName, args);
-                return true;
+                return record(true);
             } catch (Throwable t) {
-                XposedBridge.log("[PairIPFix] Failed to hook method with path " + className + "." + methodName);
-                return false;
+                logFailure("hook " + className + "." + methodName, t);
+                return record(false);
             }
         }
 
@@ -89,10 +129,10 @@ public abstract  class BaseHook {
                 };
                 Object[] args = buildArgs(paramTypes, replacement);
                 XposedHelpers.findAndHookMethod(className, this.classLoader, methodName, args);
-                return true;
+                return record(true);
             } catch (Throwable t) {
-                XposedBridge.log("[PairIPFix] Failed to replace method with path " + className + "." + methodName);
-                return false;
+                logFailure("replace " + className + "." + methodName, t);
+                return record(false);
             }
         }
 

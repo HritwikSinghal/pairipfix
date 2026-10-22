@@ -2,6 +2,7 @@ package io.github.ahmedmani.pairipfix.hooks;
 
 import android.os.Bundle;
 
+import de.robv.android.xposed.XposedBridge;
 import de.robv.android.xposed.XposedHelpers;
 import io.github.ahmedmani.pairipfix.BaseHook;
 
@@ -15,21 +16,28 @@ public class LicenseClientBypass extends BaseHook {
     }
 
     @Override
-    public boolean apply() {
-        boolean status = false;
-        status |= hookDoNothing(LICENSE_CLIENT, "initializeLicenseCheck");
-        status |= hookReturnConstant(LICENSE_CLIENT, "performLocalInstallerCheck", true);
+    public void apply() {
+        hookDoNothing(LICENSE_CLIENT, "initializeLicenseCheck");
+        hookReturnConstant(LICENSE_CLIENT, "performLocalInstallerCheck", true);
+        // Backstop for checks that start some other way: when the licensing service cannot be
+        // bound (e.g. Play Store disabled), retryOrThrow -> handleError -> startErrorDialogActivity
+        // is what shows the "Something went wrong" dialog.
+        hookAllDoNothing(LICENSE_CLIENT, "handleError");
+        hookAllDoNothing(LICENSE_CLIENT, "startErrorDialogActivity");
 
         Class<?> stateClass = findClass(LICENSE_CHECK_STATE);
-        if (stateClass != null){
-            Object fullCheckOk = XposedHelpers.getStaticObjectField(stateClass, "FULL_CHECK_OK");
-            status |= setStaticField(LICENSE_CLIENT, "licenseCheckState", fullCheckOk);
+        if (stateClass != null) {
+            // A pairip build without FULL_CHECK_OK must not abort the hooks that follow.
+            try {
+                Object fullCheckOk = XposedHelpers.getStaticObjectField(stateClass, "FULL_CHECK_OK");
+                setStaticField(LICENSE_CLIENT, "licenseCheckState", fullCheckOk);
+            } catch (Throwable t) {
+                XposedBridge.log("[PairIPFix] " + getName() + ": no FULL_CHECK_OK in " + LICENSE_CHECK_STATE + ": " + t);
+            }
         }
 
         if (classExists(LICENSE_CLIENT_V3)) {
-            status |= hookDoNothing(LICENSE_CLIENT_V3, "processResponse", int.class, Bundle.class);
+            hookDoNothing(LICENSE_CLIENT_V3, "processResponse", int.class, Bundle.class);
         }
-
-        return status;
     }
 }

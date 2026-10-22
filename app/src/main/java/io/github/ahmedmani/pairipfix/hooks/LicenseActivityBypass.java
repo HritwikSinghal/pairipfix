@@ -1,6 +1,9 @@
 package io.github.ahmedmani.pairipfix.hooks;
 
 
+import android.app.Activity;
+import android.os.Bundle;
+
 import io.github.ahmedmani.pairipfix.BaseHook;
 
 public class LicenseActivityBypass extends BaseHook {
@@ -11,16 +14,17 @@ public class LicenseActivityBypass extends BaseHook {
     }
 
     @Override
-    public boolean apply() {
-        boolean success = false;
+    public void apply() {
+        // If the error/paywall activity is launched anyway, dismiss it straight away. Only
+        // blocking its close methods would leave the dialog on screen with a dead CLOSE button.
+        hookAfter(LICENSE_ACTIVITY, "onCreate",
+                param -> ((Activity) param.thisObject).finish(), Bundle.class);
 
-        success |= hookDoNothing(LICENSE_ACTIVITY, "closeApp");
-        success |= hookDoNothing(LICENSE_ACTIVITY, "exitApp");
-        success |= hookDoNothing(LICENSE_ACTIVITY, "showErrorDialog");
-        success |= hookDoNothing(LICENSE_ACTIVITY, "showPaywallAndCloseApp");
-        success |= hookDoNothing(LICENSE_ACTIVITY, "logAndShowErrorDialog", String.class);
-        success |= hookDoNothing(LICENSE_ACTIVITY, "logAndShowErrorDialog", String.class, Exception.class);
-
-        return success;
+        hookDoNothing(LICENSE_ACTIVITY, "closeApp");
+        hookDoNothing(LICENSE_ACTIVITY, "exitApp");
+        hookDoNothing(LICENSE_ACTIVITY, "showErrorDialog");
+        hookDoNothing(LICENSE_ACTIVITY, "showPaywallAndCloseApp");
+        hookDoNothing(LICENSE_ACTIVITY, "logAndShowErrorDialog", String.class);
+        hookDoNothing(LICENSE_ACTIVITY, "logAndShowErrorDialog", String.class, Exception.class);
     }
 }

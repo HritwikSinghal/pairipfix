@@ -15,22 +15,20 @@ public class LicenseResponseBypass extends BaseHook {
     }
 
     @Override
-    public boolean apply() {
-        boolean success = false;
+    public void apply() {
 
-        success |= hookDoNothing(LICENSE_RESPONSE_HELPER, "validateResponse", Bundle.class, String.class);
-        success |= hookReturnConstant(LICENSE_RESPONSE_HELPER, "getRepeatedCheckMetadata", null, Bundle.class);
-        success |= hookDoNothing(LICENSE_RESPONSE_HELPER, "verifySignature", String.class, String.class, String.class, PublicKey.class);
+        hookDoNothing(LICENSE_RESPONSE_HELPER, "validateResponse", Bundle.class, String.class);
+        hookReturnConstant(LICENSE_RESPONSE_HELPER, "getRepeatedCheckMetadata", null, Bundle.class);
+        hookDoNothing(LICENSE_RESPONSE_HELPER, "verifySignature", String.class, String.class, String.class, PublicKey.class);
 
         if (classExists(OLD_RESPONSE_VALIDATOR)) {
-            success |= hookDoNothing(OLD_RESPONSE_VALIDATOR, "validateResponse", Bundle.class, String.class);
-            success |= hookDoNothing(OLD_RESPONSE_VALIDATOR, "verifySignature", String.class, String.class, String.class, PublicKey.class);
+            hookDoNothing(OLD_RESPONSE_VALIDATOR, "validateResponse", Bundle.class, String.class);
+            hookDoNothing(OLD_RESPONSE_VALIDATOR, "verifySignature", String.class, String.class, String.class, PublicKey.class);
         }
 
         if (classExists(RESPONSE_VALIDATOR_V3)) {
-            success |= hookDoNothing(RESPONSE_VALIDATOR_V3, "validateResponse", Bundle.class, String.class);
+            hookDoNothing(RESPONSE_VALIDATOR_V3, "validateResponse", Bundle.class, String.class);
         }
 
-        return success;
     }
 }

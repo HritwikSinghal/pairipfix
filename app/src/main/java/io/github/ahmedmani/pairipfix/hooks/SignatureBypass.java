@@ -12,9 +12,8 @@ public class SignatureBypass extends BaseHook {
     }
 
     @Override
-    public boolean apply() {
-        boolean hook1 = hookDoNothing(SIGNATURE_CHECK, "verifyIntegrity", Context.class);
-        boolean hook2 = hookReturnConstant(SIGNATURE_CHECK, "verifySignatureMatches", true, String.class);
-        return hook1 || hook2;
+    public void apply() {
+        hookDoNothing(SIGNATURE_CHECK, "verifyIntegrity", Context.class);
+        hookReturnConstant(SIGNATURE_CHECK, "verifySignatureMatches", true, String.class);
     }
 }

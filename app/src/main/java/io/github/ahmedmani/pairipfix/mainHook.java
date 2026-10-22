@@ -24,6 +24,12 @@ public class mainHook implements IXposedHookLoadPackage {
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lpparam) throws Throwable {
 
+        // handleLoadPackage also fires for other packages loaded into the app's process (WebView,
+        // GMS clients); only the process's own app carries the pairip classes we hook.
+        if (!lpparam.isFirstApplication) {
+            return;
+        }
+
         XposedBridge.log("[PairIPFix] Module loaded for package: " + lpparam.packageName);
 
         // The license hooks only need the licensecheck classes; some apps ship those without
@@ -47,19 +53,19 @@ public class mainHook implements IXposedHookLoadPackage {
                 new LicenseResponseBypass()
         );
 
-        int successCount = 0;
+        int applied = 0;
+        int attempted = 0;
         for (BaseHook hook : hooks) {
             try {
-                boolean success = hook.init(lpparam.classLoader).apply();
-                if (success) {
-                    successCount++;
-                    XposedBridge.log("[PairIPFix] " + hook.getName() + " applied successfully");
-                }
+                hook.init(lpparam.classLoader).apply();
             } catch (Throwable t) {
-                XposedBridge.log("[PairIPFix] Error applying hook with name " + hook.getName());
+                XposedBridge.log("[PairIPFix] Error applying " + hook.getName() + ": " + t);
             }
+            applied += hook.getApplied();
+            attempted += hook.getAttempted();
+            XposedBridge.log("[PairIPFix] " + hook.getName() + ": " + hook.getApplied() + "/" + hook.getAttempted() + " hooks applied");
         }
-        XposedBridge.log("[PairIPFix] " + successCount + "/" + hooks.size() + " hooks applied");
+        XposedBridge.log("[PairIPFix] Total: " + applied + "/" + attempted + " hooks applied for " + lpparam.packageName);
 
     }
 }
