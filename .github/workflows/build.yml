@@ -4,8 +4,8 @@ name: Build
 #   pairipfix-<ref>-<short7hash>.apk. Nothing is tagged or published.
 # - Manual run (workflow_dispatch on `main`, with a version such as 1.3): cut a RELEASE. Tags the
 #   built commit v<version> and publishes a GitHub Release carrying pairipfix-v<version>.apk.
-# versionCode is the commit count on the built ref, so it rises with every commit on `main` and
-# Android accepts each release as an upgrade. Releases require the SIGNING_KEY secret: a
+# versionCode is the commit count on the built ref, floored at the latest Release's code + 1, so
+# Android accepts each release as an upgrade even after a history rewrite. Releases require the SIGNING_KEY secret: a
 # debug-signed public APK has a different certificate and every later update would fail with
 # INSTALL_FAILED_UPDATE_INCOMPATIBLE. Branch builds without the secret fall back to debug signing.
 
@@ -55,10 +55,14 @@ jobs:
           fi
 
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           # Full history: versionCode is the commit count, and release notes need the previous tag.
           fetch-depth: 0
+
+      # gradlew runs gradle-wrapper.jar from the repo; refuse a jar that is not an official release.
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@v6
 
       - name: JDK 21 Setup
         uses: actions/setup-java@v5.2.0
@@ -99,8 +103,16 @@ jobs:
         id: ver
         env:
           VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          CODE="$(git rev-list --count HEAD)"
+          # The commit count alone drops after a history rewrite, and Android rejects a lower
+          # versionCode as a downgrade. Each Release records its code in a hidden marker, so never
+          # go below the latest release's code + 1.
+          COUNT="$(git rev-list --count HEAD)"
+          PREV_CODE="$(gh release view -R "$GITHUB_REPOSITORY" --json body -q .body 2>/dev/null \
+            | sed -n 's/.*<!-- versionCode=\([0-9][0-9]*\) -->.*/\1/p' | head -n1)"
+          PREV_CODE="${PREV_CODE:-0}"
+          CODE=$(( COUNT > PREV_CODE ? COUNT : PREV_CODE + 1 ))
           SHORT="$(git rev-parse --short=7 HEAD)"
           if [ "$IS_RELEASE" = "true" ]; then
             NAME="$VERSION"
@@ -148,7 +160,7 @@ jobs:
           echo "base=${BASE}" >> "$GITHUB_OUTPUT"
 
       - name: Upload APK artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.stage.outputs.base }}
           path: dist/${{ steps.stage.outputs.base }}.apk
@@ -159,6 +171,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.ver.outputs.tag }}
+          CODE: ${{ steps.ver.outputs.code }}
         run: |
           cp "$APK" "pairipfix-${TAG}.apk"
 
@@ -173,7 +186,8 @@ jobs:
             HEADER="## Changes (most recent 50 commits)"
           fi
           NOTES_FILE="$(mktemp)"
-          printf '%s\n\n%s\n' "$HEADER" "$(git log "${LOG_ARGS[@]}")" > "$NOTES_FILE"
+          # The versionCode marker is read back by the next build's "Compute version" step.
+          printf '%s\n\n%s\n\n<!-- versionCode=%s -->\n' "$HEADER" "$(git log "${LOG_ARGS[@]}")" "$CODE" > "$NOTES_FILE"
 
           # --target creates the tag on GitHub at exactly the commit that was built.
           gh release create "${TAG}" "pairipfix-${TAG}.apk" \
