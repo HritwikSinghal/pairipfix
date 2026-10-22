@@ -14,14 +14,28 @@ import io.github.ahmedmani.pairipfix.hooks.SignatureBypass;
 
 public class mainHook implements IXposedHookLoadPackage {
 
+    private static final String[] PAIRIP_MARKERS = {
+            "com.pairip.VMRunner",
+            "com.pairip.licensecheck.LicenseClient",
+            "com.pairip.licensecheck3.LicenseClientV3",
+    };
+
 
     @Override
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lpparam) throws Throwable {
 
         XposedBridge.log("[PairIPFix] Module loaded for package: " + lpparam.packageName);
 
-        Class<?> clazz = XposedHelpers.findClassIfExists("com.pairip.VMRunner", lpparam.classLoader);
-        if (clazz == null) {
+        // The license hooks only need the licensecheck classes; some apps ship those without
+        // VMRunner, so requiring VMRunner alone would skip them.
+        boolean hasPairip = false;
+        for (String marker : PAIRIP_MARKERS) {
+            if (XposedHelpers.findClassIfExists(marker, lpparam.classLoader) != null) {
+                hasPairip = true;
+                break;
+            }
+        }
+        if (!hasPairip) {
             XposedBridge.log("[PairIPFix] App with package name " + lpparam.packageName + " does not have Pairip protection, or protection is not recognized, exiting.");
             return;
         }
